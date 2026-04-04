@@ -17,9 +17,34 @@ interface Props {
   onClose: () => void;
 }
 
+const DEBIT_CATEGORIES = [
+  "Food & Dining",
+  "Transport",
+  "Shopping",
+  "Entertainment",
+  "Utilities",
+  "Healthcare",
+  "Education",
+  "Travel",
+  "Transfer",
+  "Other",
+];
+
+const CREDIT_CATEGORIES = [
+  "Salary",
+  "Interest",
+  "Fixed Deposit",
+  "Investments",
+  "Dividend",
+  "Rental Income",
+  "Refund",
+  "Transfer",
+  "Other Income",
+];
+
 export default function AddTransactionModal({ onClose }: Props) {
   const colors = useColors();
-  const { addTransaction, accounts, categories } = useData();
+  const { addTransaction, accounts } = useData();
   const [type, setType] = useState<"debit" | "credit">("debit");
   const [amount, setAmount] = useState("");
   const [merchant, setMerchant] = useState("");
@@ -28,6 +53,13 @@ export default function AddTransactionModal({ onClose }: Props) {
   const [note, setNote] = useState("");
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
+  const activeCategories = type === "debit" ? DEBIT_CATEGORIES : CREDIT_CATEGORIES;
+
+  const handleTypeChange = (newType: "debit" | "credit") => {
+    setType(newType);
+    // Reset category when switching type
+    setSelectedCategory(newType === "debit" ? "Other" : "Salary");
+  };
 
   const handleSave = () => {
     if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
@@ -35,7 +67,7 @@ export default function AddTransactionModal({ onClose }: Props) {
       return;
     }
     if (!merchant.trim()) {
-      Alert.alert("Invalid", "Please enter a merchant name.");
+      Alert.alert("Invalid", "Please enter a description.");
       return;
     }
     const t: Transaction = {
@@ -64,7 +96,7 @@ export default function AddTransactionModal({ onClose }: Props) {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Type Toggle */}
+        {/* Type Toggle — Debit / Credit */}
         <View style={[styles.typeToggle, { backgroundColor: colors.card }]}>
           {(["debit", "credit"] as const).map((t) => (
             <TouchableOpacity
@@ -72,10 +104,10 @@ export default function AddTransactionModal({ onClose }: Props) {
               style={[
                 styles.typeBtn,
                 type === t && {
-                  backgroundColor: t === "debit" ? "#ef4444" : "#4CD964",
+                  backgroundColor: t === "debit" ? "#EF5350" : "#4CD964",
                 },
               ]}
-              onPress={() => setType(t)}
+              onPress={() => handleTypeChange(t)}
               activeOpacity={0.8}
             >
               <Text
@@ -84,7 +116,7 @@ export default function AddTransactionModal({ onClose }: Props) {
                   { color: type === t ? "#fff" : colors.mutedForeground },
                 ]}
               >
-                {t === "debit" ? "Expense" : "Income"}
+                {t === "debit" ? "Debit" : "Credit"}
               </Text>
             </TouchableOpacity>
           ))}
@@ -101,13 +133,15 @@ export default function AddTransactionModal({ onClose }: Props) {
           placeholderTextColor={colors.mutedForeground}
         />
 
-        {/* Merchant */}
-        <Text style={[styles.label, { color: colors.mutedForeground }]}>Merchant / Description</Text>
+        {/* Merchant / Source */}
+        <Text style={[styles.label, { color: colors.mutedForeground }]}>
+          {type === "debit" ? "Merchant / Description" : "Source / Description"}
+        </Text>
         <TextInput
           style={[styles.input, { backgroundColor: colors.card, color: colors.foreground, borderColor: colors.border }]}
           value={merchant}
           onChangeText={setMerchant}
-          placeholder="e.g. Zomato"
+          placeholder={type === "debit" ? "e.g. Zomato" : "e.g. Salary"}
           placeholderTextColor={colors.mutedForeground}
         />
 
@@ -143,7 +177,7 @@ export default function AddTransactionModal({ onClose }: Props) {
         {/* Category */}
         <Text style={[styles.label, { color: colors.mutedForeground }]}>Category</Text>
         <View style={styles.chipRow}>
-          {categories.map((cat) => (
+          {activeCategories.map((cat) => (
             <TouchableOpacity
               key={cat}
               style={[

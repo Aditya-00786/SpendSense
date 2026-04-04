@@ -1,10 +1,19 @@
 import { Feather } from "@expo/vector-icons";
-import React from "react";
-import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import * as Haptics from "expo-haptics";
+import React, { useRef } from "react";
+import {
+  Animated,
+  I18nManager,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { Swipeable } from "react-native-gesture-handler";
 import { Transaction } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
-const CATEGORY_ICONS: Record<string, { icon: string; color: string }> = {
+export const CATEGORY_ICONS: Record<string, { icon: string; color: string }> = {
   "Food & Dining": { icon: "coffee", color: "#FF6B6B" },
   Transport: { icon: "navigation", color: "#4ECDC4" },
   Shopping: { icon: "shopping-bag", color: "#A78BFA" },
@@ -14,18 +23,28 @@ const CATEGORY_ICONS: Record<string, { icon: string; color: string }> = {
   Education: { icon: "book", color: "#34D399" },
   Travel: { icon: "map", color: "#FB923C" },
   Transfer: { icon: "repeat", color: "#94A3B8" },
+  Salary: { icon: "briefcase", color: "#4CD964" },
+  Interest: { icon: "percent", color: "#4CD964" },
+  "Fixed Deposit": { icon: "lock", color: "#34D399" },
+  Investments: { icon: "trending-up", color: "#26C6DA" },
+  Dividend: { icon: "dollar-sign", color: "#FFA726" },
+  "Rental Income": { icon: "home", color: "#AB47BC" },
+  Refund: { icon: "corner-down-left", color: "#4ECDC4" },
+  "Other Income": { icon: "plus-circle", color: "#94A3B8" },
   Other: { icon: "circle", color: "#6B7280" },
 };
 
 interface Props {
   transaction: Transaction;
   onPress?: () => void;
+  onDelete?: () => void;
 }
 
-export default function TransactionCard({ transaction, onPress }: Props) {
+export default function TransactionCard({ transaction, onPress, onDelete }: Props) {
   const colors = useColors();
   const categoryInfo = CATEGORY_ICONS[transaction.category] ?? CATEGORY_ICONS["Other"];
   const isCredit = transaction.type === "credit";
+  const swipeableRef = useRef<Swipeable>(null);
 
   const formatDate = (dateStr: string) => {
     try {
@@ -37,49 +56,107 @@ export default function TransactionCard({ transaction, onPress }: Props) {
     }
   };
 
+  const handleDelete = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    swipeableRef.current?.close();
+    onDelete?.();
+  };
+
+  const renderRightActions = (
+    progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>
+  ) => {
+    const scale = dragX.interpolate({
+      inputRange: [-100, -60, 0],
+      outputRange: [1, 0.9, 0.8],
+      extrapolate: "clamp",
+    });
+    const opacity = progress.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0, 0.7, 1],
+    });
+
+    return (
+      <Animated.View style={[styles.deleteAction, { opacity }]}>
+        <Animated.View style={{ transform: [{ scale }] }}>
+          <TouchableOpacity
+            style={styles.deleteBtn}
+            onPress={handleDelete}
+            activeOpacity={0.8}
+          >
+            <Feather name="trash-2" size={20} color="#fff" />
+            <Text style={styles.deleteText}>Delete</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Animated.View>
+    );
+  };
+
   return (
-    <TouchableOpacity
-      style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}
-      onPress={onPress}
-      activeOpacity={0.7}
+    <Swipeable
+      ref={swipeableRef}
+      renderRightActions={renderRightActions}
+      rightThreshold={80}
+      onSwipeableOpen={(direction) => {
+        if (direction === "right") return;
+        // Swiped fully left — auto delete
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        // Small delay for visual feedback
+        setTimeout(() => {
+          onDelete?.();
+        }, 200);
+      }}
+      friction={2}
+      overshootFriction={8}
+      containerStyle={styles.swipeContainer}
     >
-      <View
-        style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}
+      <TouchableOpacity
+        style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={onPress}
+        activeOpacity={0.7}
       >
-        <Feather name={categoryInfo.icon as any} size={20} color={categoryInfo.color} />
-      </View>
-      <View style={styles.info}>
-        <Text style={[styles.merchant, { color: colors.foreground }]} numberOfLines={1}>
-          {transaction.merchant}
-        </Text>
-        <Text style={[styles.category, { color: colors.mutedForeground }]}>
-          {transaction.category} · {transaction.bank}
-        </Text>
-      </View>
-      <View style={styles.right}>
-        <Text
-          style={[
-            styles.amount,
-            { color: isCredit ? "#4CD964" : colors.foreground },
-          ]}
+        <View
+          style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}
         >
-          {isCredit ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
-        </Text>
-        <Text style={[styles.date, { color: colors.mutedForeground }]}>
-          {formatDate(transaction.date)}
-        </Text>
-      </View>
-    </TouchableOpacity>
+          <Feather name={categoryInfo.icon as any} size={20} color={categoryInfo.color} />
+        </View>
+        <View style={styles.info}>
+          <Text style={[styles.merchant, { color: colors.foreground }]} numberOfLines={1}>
+            {transaction.merchant}
+          </Text>
+          <Text style={[styles.category, { color: colors.mutedForeground }]}>
+            {transaction.category} · {transaction.bank}
+          </Text>
+        </View>
+        <View style={styles.right}>
+          <Text
+            style={[
+              styles.amount,
+              { color: isCredit ? "#4CD964" : colors.foreground },
+            ]}
+          >
+            {isCredit ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
+          </Text>
+          <Text style={[styles.date, { color: colors.mutedForeground }]}>
+            {formatDate(transaction.date)}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    </Swipeable>
   );
 }
 
 const styles = StyleSheet.create({
+  swipeContainer: {
+    marginBottom: 10,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
   container: {
     flexDirection: "row",
     alignItems: "center",
     padding: 14,
     borderRadius: 14,
-    marginBottom: 10,
     borderWidth: 1,
   },
   iconContainer: {
@@ -113,5 +190,25 @@ const styles = StyleSheet.create({
   date: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
+  },
+  deleteAction: {
+    width: 90,
+    backgroundColor: "#EF5350",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 14,
+    marginLeft: 8,
+  },
+  deleteBtn: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  deleteText: {
+    color: "#fff",
+    fontSize: 11,
+    fontFamily: "Inter_600SemiBold",
   },
 });

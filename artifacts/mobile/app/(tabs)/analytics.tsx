@@ -11,6 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import BarChart from "@/components/BarChart";
 import DonutChart from "@/components/DonutChart";
+import TransactionCard from "@/components/TransactionCard";
 import { useData } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -35,7 +36,7 @@ const CATEGORY_BUDGETS: Record<string, number> = {
 export default function AnalyticsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { transactions } = useData();
+  const { transactions, deleteTransaction } = useData();
   const [view, setView] = useState<ViewMode>("Categories");
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
@@ -228,23 +229,13 @@ export default function AnalyticsScreen() {
         {/* Transactions View */}
         {view === "Transactions" && (
           <View>
-            {thisMonthTx.slice(0, 20).map((tx) => {
-              const isCredit = tx.type === "credit";
-              return (
-                <View
-                  key={tx.id}
-                  style={[styles.txRow, { backgroundColor: colors.card, borderColor: colors.border }]}
-                >
-                  <View style={styles.txInfo}>
-                    <Text style={[styles.txMerchant, { color: colors.foreground }]}>{tx.merchant}</Text>
-                    <Text style={[styles.txCat, { color: colors.mutedForeground }]}>{tx.category}</Text>
-                  </View>
-                  <Text style={[styles.txAmount, { color: isCredit ? "#4CD964" : colors.foreground }]}>
-                    {isCredit ? "+" : "-"}₹{tx.amount.toLocaleString("en-IN")}
-                  </Text>
-                </View>
-              );
-            })}
+            {thisMonthTx.slice(0, 20).map((tx) => (
+              <TransactionCard
+                key={tx.id}
+                transaction={tx}
+                onDelete={() => deleteTransaction(tx.id)}
+              />
+            ))}
           </View>
         )}
 

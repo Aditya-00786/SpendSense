@@ -23,7 +23,7 @@ const CHART_COLORS = ["#4CD964", "#5C6BC0", "#26C6DA", "#FFA726", "#EF5350", "#A
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts } = useData();
+  const { transactions, accounts, deleteTransaction } = useData();
   const [showSMS, setShowSMS] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
 
@@ -39,10 +39,6 @@ export default function HomeScreen() {
 
   const totalSpend = useMemo(
     () => thisMonth.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0),
-    [thisMonth]
-  );
-  const totalIncome = useMemo(
-    () => thisMonth.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0),
     [thisMonth]
   );
   const totalBalance = useMemo(
@@ -118,30 +114,25 @@ export default function HomeScreen() {
           </Text>
           <DonutChart
             segments={segments}
-            total={Math.max(totalIncome, totalSpend)}
-            centerLabel={`₹${(totalSpend / 1000).toFixed(0)}k`}
-            centerSub={totalIncome > 0 ? `${Math.round((totalSpend / totalIncome) * 100)}% of income` : ""}
+            total={totalSpend > 0 ? totalSpend : 1}
+            centerLabel={`₹${totalSpend.toLocaleString("en-IN")}`}
+            centerSub={currentMonth}
             size={210}
             strokeWidth={26}
           />
 
-          {/* Stats Row */}
+          {/* Stats Row — Spendings + Balance only */}
           <View style={styles.statsRow}>
             <View style={styles.stat}>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Income</Text>
-              <Text style={[styles.statValue, { color: "#4CD964" }]}>
-                ₹{totalIncome.toLocaleString("en-IN")}
+              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Spendings</Text>
+              <Text style={[styles.statValue, { color: "#EF5350" }]}>
+                ₹{totalSpend.toLocaleString("en-IN")}
               </Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.stat}>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Budget</Text>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>₹30,000</Text>
-            </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
-            <View style={styles.stat}>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Balance</Text>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>
+              <Text style={[styles.statValue, { color: "#4CD964" }]}>
                 ₹{totalBalance.toLocaleString("en-IN")}
               </Text>
             </View>
@@ -174,7 +165,11 @@ export default function HomeScreen() {
             </View>
           ) : (
             recentTransactions.map((tx) => (
-              <TransactionCard key={tx.id} transaction={tx} />
+              <TransactionCard
+                key={tx.id}
+                transaction={tx}
+                onDelete={() => deleteTransaction(tx.id)}
+              />
             ))
           )}
         </View>
