@@ -20,8 +20,8 @@ interface Props {
 }
 
 const SAMPLE_SMS = [
-  `Your A/c no. 1234567 is debited with INR 1,200 on 05-05-2024 towards UPI/933309880936/ZOMATO/SR. Current Bal is INR 45,200 CR  - Saraswat Bank`,
-  `Your A/c no. 1234567 is credited with 45000 on 02-05-2024 towards UPI/103045447228/SALARY/HD. Current Bal is 52000 CR  - Saraswat Bank`,
+  `Your A/c no. 229302 is credited with INR 1,749.00 on 03-04-2026 towards UPI/103045447228/WWW MYNTRA/HD. Current Bal is INR 1,32,000.87 CR  - Saraswat Bank`,
+  `Your a/c no. XX9302 is debited for Rs.899.00 on 03-04-2026 23:16:18 and credited to vpa snitchapparels1.rzp@hdfcbank (UPI Ref no 103045481551) Your Current Balance is INR 129912.87. If not you, give a missed call on 7666339922 - Saraswat Bank`,
   `Sent Rs.360\nFrom HDFC Bank A/C *2233\nTo Uber\nOn 19-05-2024\nRef 645410750429\nNot You?\nCall 18002586161/SMS BLOCK UPI to 7308080808`,
 ];
 

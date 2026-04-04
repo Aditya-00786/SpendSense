@@ -92,98 +92,174 @@ function detectCategory(merchant: string): string {
   return "Other";
 }
 
+// Clean VPA merchant name: "snitchapparels1.rzp@hdfcbank" → "Snitchapparels1"
+function cleanVPAMerchant(vpa: string): string {
+  const localPart = vpa.split("@")[0];
+  const cleaned = localPart.replace(/\.(rzp|paytm|phonepe|gpay|upi|icici|axis|sbi|ybl|ok|ibl|freecharge|mobikwik)$/i, "");
+  return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+// Extract last-N digits from masked acc like "XX9302" → "9302"
+function extractAccSuffix(raw: string): string {
+  return raw.replace(/^X+/i, "").trim();
+}
+
+// Parse date "03-04-2026" from various formats, returns ISO date string
+function parseDate(raw: string): string {
+  const parts = raw.trim().split("-");
+  if (parts.length === 3) {
+    const [d, m, y] = parts;
+    if (y && y.length === 4) return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  return raw;
+}
+
 function parseSaraswatDebit(sms: string): Partial<Transaction> | null {
-  // Debit: A/c no. XXXXXXX is debited with INR <amount> on <date>
-  const debitMatch = sms.match(
-    /A\/c no\.\s*(\w+)\s+is debited with INR\s+([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
+  // New format: "Your a/c no. XX9302 is debited for Rs.899.00 on 03-04-2026 23:16:18 and credited to vpa snitchapparels1.rzp@hdfcbank"
+  const newDebit = sms.match(
+    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-]+)/i
   );
-  if (debitMatch) {
-    const merchantMatch = sms.match(/towards\s+(?:UPI\/\d+\/)?([^\/\n.]+)/i);
-    const balanceMatch = sms.match(
-      /Current Bal is INR\s+([\d,]+(?:\.\d+)?)/i
-    );
-    const merchant = merchantMatch
-      ? merchantMatch[1].trim().replace(/\//g, " ").trim()
-      : "Unknown";
+  if (newDebit) {
+    const vpaMatch = sms.match(/credited to vpa\s+(\S+)/i);
+    const balanceMatch = sms.match(/Current Balance is INR\s+([\d,]+(?:\.\d+)?)/i);
+    const merchant = vpaMatch ? cleanVPAMerchant(vpaMatch[1]) : "Unknown";
     return {
       type: "debit",
-      accountNumber: debitMatch[1],
-      amount: parseFloat(debitMatch[2].replace(/,/g, "")),
-      date: debitMatch[3],
+      accountNumber: extractAccSuffix(newDebit[1]),
+      amount: parseFloat(newDebit[2].replace(/,/g, "")),
+      date: parseDate(newDebit[3]),
       merchant,
-      balance: balanceMatch
-        ? parseFloat(balanceMatch[1].replace(/,/g, ""))
-        : undefined,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
       bank: "Saraswat Bank",
       category: detectCategory(merchant),
     };
   }
+
+  // Old format: "A/c no. XXXXXXX is debited with INR <amount> on <date>"
+  const oldDebit = sms.match(
+    /A\/c no\.\s*(\w+)\s+is debited with INR\s+([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
+  );
+  if (oldDebit) {
+    const merchantMatch = sms.match(/towards\s+(?:UPI\/\d+\/)?([^\/\n.]+)/i);
+    const balanceMatch = sms.match(/Current Bal is INR\s+([\d,]+(?:\.\d+)?)/i);
+    const merchant = merchantMatch ? merchantMatch[1].trim().replace(/\//g, " ").trim() : "Unknown";
+    return {
+      type: "debit",
+      accountNumber: extractAccSuffix(oldDebit[1]),
+      amount: parseFloat(oldDebit[2].replace(/,/g, "")),
+      date: parseDate(oldDebit[3]),
+      merchant,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
+      bank: "Saraswat Bank",
+      category: detectCategory(merchant),
+    };
+  }
+
   return null;
 }
 
 function parseSaraswatCredit(sms: string): Partial<Transaction> | null {
-  // Credit: A/c no. XXXXXXX is credited with <amount> on <date>
+  // New format: "Your A/c no. 229302 is credited with INR 1,749.00 on 03-04-2026 towards UPI/.../WWW MYNTRA/..."
   const creditMatch = sms.match(
-    /A\/c no\.\s*(\w+)\s+is credited with\s+([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
+    /A\/c no\.\s*([\w]+)\s+is credited with INR\s+([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
   );
   if (creditMatch) {
-    const merchantMatch = sms.match(/towards\s+(?:UPI\/\d+\/)?([^\/\n.]+)/i);
-    const balanceMatch = sms.match(
-      /Current Bal is\s+([\d,]+(?:\.\d+)?)/i
-    );
-    const merchant = merchantMatch
-      ? merchantMatch[1].trim().replace(/\//g, " ").trim()
-      : "Unknown";
+    const merchantMatch = sms.match(/towards\s+(?:UPI\/\d+\/)?([^\/\n]+)/i);
+    const balanceMatch = sms.match(/Current Bal is INR\s+([\d,]+(?:\.\d+)?)/i);
+    const raw = merchantMatch ? merchantMatch[1].trim().split("/")[0].trim() : "Unknown";
+    const merchant = raw.replace(/^WWW\s+/i, "").trim() || "Unknown";
     return {
       type: "credit",
-      accountNumber: creditMatch[1],
+      accountNumber: extractAccSuffix(creditMatch[1]),
       amount: parseFloat(creditMatch[2].replace(/,/g, "")),
-      date: creditMatch[3],
+      date: parseDate(creditMatch[3]),
       merchant,
-      balance: balanceMatch
-        ? parseFloat(balanceMatch[1].replace(/,/g, ""))
-        : undefined,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
       bank: "Saraswat Bank",
-      category: "Transfer",
+      category: detectCategory(merchant),
     };
   }
+
+  // Old format without INR keyword
+  const oldCredit = sms.match(
+    /A\/c no\.\s*(\w+)\s+is credited with\s+([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
+  );
+  if (oldCredit) {
+    const merchantMatch = sms.match(/towards\s+(?:UPI\/\d+\/)?([^\/\n.]+)/i);
+    const balanceMatch = sms.match(/Current Bal is\s+([\d,]+(?:\.\d+)?)/i);
+    const merchant = merchantMatch ? merchantMatch[1].trim().replace(/\//g, " ").trim() : "Unknown";
+    return {
+      type: "credit",
+      accountNumber: extractAccSuffix(oldCredit[1]),
+      amount: parseFloat(oldCredit[2].replace(/,/g, "")),
+      date: parseDate(oldCredit[3]),
+      merchant,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
+      bank: "Saraswat Bank",
+      category: detectCategory(merchant),
+    };
+  }
+
   return null;
 }
 
 function parseHDFCDebit(sms: string): Partial<Transaction> | null {
-  // HDFC: Sent Rs.<amount> From HDFC Bank A/C *<acc> To <merchant> On <date>
+  // New format (same structure as Saraswat debit but ends with "- HDFC Bank" or contains "HDFC")
+  const newDebit = sms.match(
+    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-]+)/i
+  );
+  if (newDebit) {
+    const vpaMatch = sms.match(/credited to vpa\s+(\S+)/i);
+    const balanceMatch = sms.match(/Current Balance is INR\s+([\d,]+(?:\.\d+)?)/i);
+    const merchant = vpaMatch ? cleanVPAMerchant(vpaMatch[1]) : "Unknown";
+    return {
+      type: "debit",
+      accountNumber: extractAccSuffix(newDebit[1]),
+      amount: parseFloat(newDebit[2].replace(/,/g, "")),
+      date: parseDate(newDebit[3]),
+      merchant,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
+      bank: "HDFC Bank",
+      category: detectCategory(merchant),
+    };
+  }
+
+  // Old format: "Sent Rs.<amount> From HDFC Bank A/C *<acc> To <merchant> On <date>"
   const amountMatch = sms.match(/Sent Rs\.([\d,]+(?:\.\d+)?)/i);
   const accMatch = sms.match(/A\/C \*(\d+)/i);
   const toMatch = sms.match(/To\s+([^\n]+)/i);
-  const dateMatch = sms.match(/On\s+([\d-\/\s]+)/i);
-
+  const dateMatch = sms.match(/On\s+([\d-\/]+)/i);
   if (amountMatch && accMatch) {
     const merchant = toMatch ? toMatch[1].trim() : "Unknown";
     return {
       type: "debit",
       accountNumber: accMatch[1],
       amount: parseFloat(amountMatch[1].replace(/,/g, "")),
-      date: dateMatch ? dateMatch[1].trim() : new Date().toISOString(),
+      date: dateMatch ? parseDate(dateMatch[1].trim()) : new Date().toISOString().split("T")[0],
       merchant,
       bank: "HDFC Bank",
       category: detectCategory(merchant),
     };
   }
+
   return null;
 }
 
-export function parseSMS(
-  smsText: string
-): Partial<Transaction> | null {
+export function parseSMS(smsText: string): Partial<Transaction> | null {
   const lower = smsText.toLowerCase();
 
-  if (lower.includes("saraswat")) {
+  // Detect bank from SMS footer
+  const isSaraswat = lower.includes("saraswat");
+  const isHDFC = lower.includes("hdfc");
+
+  if (isSaraswat) {
     if (lower.includes("debited")) return parseSaraswatDebit(smsText);
     if (lower.includes("credited")) return parseSaraswatCredit(smsText);
   }
 
-  if (lower.includes("hdfc") && lower.includes("sent rs")) {
-    return parseHDFCDebit(smsText);
+  if (isHDFC) {
+    if (lower.includes("sent rs")) return parseHDFCDebit(smsText);
+    if (lower.includes("debited")) return parseHDFCDebit(smsText);
   }
 
   return null;
@@ -417,14 +493,21 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         rawSMS: sms,
       };
       addTransaction(t);
-      // Update account balance
-      if (parsed.balance !== undefined) {
+      // Update account balance and account number suffix if parsed
+      if (parsed.balance !== undefined || parsed.accountNumber) {
         setAccounts((prev) => {
-          const updated = prev.map((acc) =>
-            acc.accountNumber === t.accountNumber
-              ? { ...acc, balance: t.balance!, lastUpdated: new Date().toISOString() }
-              : acc
-          );
+          const suffix = t.accountNumber; // e.g. "9302"
+          const updated = prev.map((acc) => {
+            const accSuffix = acc.accountNumber.slice(-suffix.length);
+            if (accSuffix === suffix || acc.accountNumber === suffix) {
+              return {
+                ...acc,
+                ...(parsed.balance !== undefined ? { balance: parsed.balance! } : {}),
+                lastUpdated: new Date().toISOString(),
+              };
+            }
+            return acc;
+          });
           saveAccounts(updated);
           return updated;
         });
