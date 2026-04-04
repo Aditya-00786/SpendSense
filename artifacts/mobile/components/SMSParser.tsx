@@ -1,14 +1,17 @@
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import React, { useState } from "react";
 import {
   Alert,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useData } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -24,9 +27,41 @@ const SAMPLE_SMS = [
 
 export default function SMSParser({ onClose }: Props) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { addTransactionFromSMS } = useData();
   const [smsText, setSmsText] = useState("");
   const [result, setResult] = useState<string | null>(null);
+  const [pasting, setPasting] = useState(false);
+
+  const topInset = Platform.OS === "web" ? 20 : insets.top;
+
+  const handlePaste = async () => {
+    try {
+      setPasting(true);
+      let text = "";
+      if (Platform.OS === "web") {
+        if (navigator.clipboard?.readText) {
+          text = await navigator.clipboard.readText();
+        } else {
+          Alert.alert("Not supported", "Clipboard paste is not supported in this browser. Please paste manually.");
+          return;
+        }
+      } else {
+        text = await Clipboard.getStringAsync();
+      }
+      if (text.trim()) {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setSmsText(text.trim());
+        setResult(null);
+      } else {
+        Alert.alert("Empty clipboard", "Your clipboard is empty.");
+      }
+    } catch {
+      Alert.alert("Error", "Could not read clipboard.");
+    } finally {
+      setPasting(false);
+    }
+  };
 
   const handleParse = () => {
     if (!smsText.trim()) {
@@ -52,12 +87,12 @@ export default function SMSParser({ onClose }: Props) {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <View style={[styles.container, { backgroundColor: colors.background, paddingTop: topInset + 16 }]}>
       <View style={styles.header}>
         <Text style={[styles.title, { color: colors.foreground }]}>
           Parse Bank SMS
         </Text>
-        <TouchableOpacity onPress={onClose}>
+        <TouchableOpacity onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
           <Feather name="x" size={24} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
@@ -87,14 +122,25 @@ export default function SMSParser({ onClose }: Props) {
         textAlignVertical="top"
       />
 
+      {/* Paste button */}
+      <TouchableOpacity
+        style={[styles.pasteBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={handlePaste}
+        activeOpacity={0.75}
+        disabled={pasting}
+      >
+        <Feather name="clipboard" size={15} color={colors.primary} />
+        <Text style={[styles.pasteBtnText, { color: colors.primary }]}>
+          {pasting ? "Pasting…" : "Paste from clipboard"}
+        </Text>
+      </TouchableOpacity>
+
       {result && (
         <View
           style={[
             styles.resultBox,
             {
-              backgroundColor: result.startsWith("✓")
-                ? "#4CD96420"
-                : "#ef444420",
+              backgroundColor: result.startsWith("✓") ? "#4CD96420" : "#ef444420",
               borderColor: result.startsWith("✓") ? "#4CD964" : "#ef4444",
             },
           ]}
@@ -143,7 +189,8 @@ export default function SMSParser({ onClose }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: "row",
@@ -167,7 +214,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     minHeight: 120,
+    marginBottom: 10,
+  },
+  pasteBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
     marginBottom: 12,
+    alignSelf: "flex-start",
+  },
+  pasteBtnText: {
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
   },
   resultBox: {
     borderRadius: 10,

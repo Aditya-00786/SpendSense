@@ -11,8 +11,10 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import AddOptionsSheet from "@/components/AddOptionsSheet";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import DonutChart from "@/components/DonutChart";
+import MonthPickerModal from "@/components/MonthPickerModal";
 import SMSParser from "@/components/SMSParser";
 import TransactionCard from "@/components/TransactionCard";
 import { useData } from "@/context/DataContext";
@@ -24,18 +26,24 @@ export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { transactions, accounts, deleteTransaction } = useData();
+
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
+  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+
+  const [showOptions, setShowOptions] = useState(false);
   const [showSMS, setShowSMS] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
 
-  const currentMonth = new Date().toLocaleString("default", { month: "long" });
+  const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString("default", { month: "long" });
 
   const thisMonth = useMemo(() => {
-    const now = new Date();
     return transactions.filter((t) => {
       const d = new Date(t.date);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      return d.getMonth() === selectedMonth && d.getFullYear() === selectedYear;
     });
-  }, [transactions]);
+  }, [transactions, selectedMonth, selectedYear]);
 
   const totalSpend = useMemo(
     () => thisMonth.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0),
@@ -62,9 +70,14 @@ export default function HomeScreen() {
     color: CHART_COLORS[i % CHART_COLORS.length],
   }));
 
-  const recentTransactions = [...transactions].slice(0, 5);
+  const recentTransactions = [...thisMonth].slice(0, 5);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+
+  const openAdd = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setShowOptions(true);
+  };
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -80,26 +93,25 @@ export default function HomeScreen() {
               Hi Yash
             </Text>
             <Text style={[styles.monthLabel, { color: colors.foreground }]}>
-              Money manager › {currentMonth}
+              Money manager › {selectedMonthName}
             </Text>
           </View>
           <View style={styles.headerActions}>
+            {/* Calendar button */}
             <TouchableOpacity
               style={[styles.iconBtn, { backgroundColor: colors.card }]}
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowSMS(true);
+                setShowMonthPicker(true);
               }}
               activeOpacity={0.7}
             >
-              <Feather name="message-square" size={18} color={colors.primary} />
+              <Feather name="calendar" size={18} color={colors.primary} />
             </TouchableOpacity>
+            {/* Add button */}
             <TouchableOpacity
               style={[styles.iconBtn, { backgroundColor: colors.card }]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                setShowAddTx(true);
-              }}
+              onPress={openAdd}
               activeOpacity={0.7}
             >
               <Feather name="plus" size={18} color={colors.primary} />
@@ -110,18 +122,18 @@ export default function HomeScreen() {
         {/* Donut Chart */}
         <View style={styles.chartSection}>
           <Text style={[styles.chartTitle, { color: colors.mutedForeground }]}>
-            Spent in {currentMonth}
+            Spent in {selectedMonthName}
           </Text>
           <DonutChart
             segments={segments}
             total={totalSpend > 0 ? totalSpend : 1}
             centerLabel={`₹${totalSpend.toLocaleString("en-IN")}`}
-            centerSub={currentMonth}
+            centerSub={selectedMonthName}
             size={210}
             strokeWidth={26}
           />
 
-          {/* Stats Row — Spendings + Balance only */}
+          {/* Stats Row */}
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Spendings</Text>
@@ -143,11 +155,11 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
-              Recent transactions
+              {selectedMonthName} transactions
             </Text>
             <TouchableOpacity
               style={[styles.addBtn, { backgroundColor: colors.primary }]}
-              onPress={() => setShowAddTx(true)}
+              onPress={openAdd}
               activeOpacity={0.8}
             >
               <Feather name="plus" size={14} color={colors.primaryForeground} />
@@ -160,7 +172,7 @@ export default function HomeScreen() {
             <View style={styles.emptyState}>
               <Feather name="inbox" size={32} color={colors.mutedForeground} />
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                No transactions yet. Parse an SMS or add manually.
+                No transactions for {selectedMonthName}. Add one via SMS or manually.
               </Text>
             </View>
           ) : (
@@ -174,6 +186,26 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+
+      {/* Add Options Sheet */}
+      <AddOptionsSheet
+        visible={showOptions}
+        onClose={() => setShowOptions(false)}
+        onSelectSMS={() => setShowSMS(true)}
+        onSelectManual={() => setShowAddTx(true)}
+      />
+
+      {/* Month Picker */}
+      <MonthPickerModal
+        visible={showMonthPicker}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        onSelect={(m, y) => {
+          setSelectedMonth(m);
+          setSelectedYear(y);
+        }}
+        onClose={() => setShowMonthPicker(false)}
+      />
 
       {/* SMS Modal */}
       <Modal visible={showSMS} animationType="slide" presentationStyle="pageSheet">
