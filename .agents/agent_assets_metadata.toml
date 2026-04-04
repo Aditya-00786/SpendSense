@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "Utdvvhw6tYsxXzMOJDIis"
+uri = "file://artifacts/mobile/assets/images/icon.png"
+type = "image"
+title = "spendsense app icon"
