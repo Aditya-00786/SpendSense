@@ -99,9 +99,10 @@ function cleanVPAMerchant(vpa: string): string {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
 }
 
-// Extract last-N digits from masked acc like "XX9302" → "9302"
+// Extract last 4 digits from any account string: "XX9302" → "9302", "229302" → "9302", "2233" → "2233"
 function extractAccSuffix(raw: string): string {
-  return raw.replace(/^X+/i, "").trim();
+  const stripped = raw.replace(/^X+/i, "").trim();
+  return stripped.length > 4 ? stripped.slice(-4) : stripped;
 }
 
 // Parse date "03-04-2026" from various formats, returns ISO date string
@@ -271,6 +272,7 @@ interface DataContextType {
   reminders: Reminder[];
   addTransaction: (t: Transaction) => void;
   addTransactionFromSMS: (sms: string) => Transaction | null;
+  updateTransaction: (t: Transaction) => void;
   updateAccount: (account: Account) => void;
   addReminder: (r: Reminder) => void;
   updateReminder: (r: Reminder) => void;
@@ -493,21 +495,35 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         rawSMS: sms,
       };
       addTransaction(t);
-      // Update account balance and account number suffix if parsed
-      if (parsed.balance !== undefined || parsed.accountNumber) {
+      // Update or auto-create account when balance is parsed from SMS
+      if (parsed.balance !== undefined) {
         setAccounts((prev) => {
-          const suffix = t.accountNumber; // e.g. "9302"
+          const suffix4 = t.accountNumber.slice(-4); // always 4 digits
+          const bankKey = t.bank;
+          let matched = false;
           const updated = prev.map((acc) => {
-            const accSuffix = acc.accountNumber.slice(-suffix.length);
-            if (accSuffix === suffix || acc.accountNumber === suffix) {
-              return {
-                ...acc,
-                ...(parsed.balance !== undefined ? { balance: parsed.balance! } : {}),
-                lastUpdated: new Date().toISOString(),
-              };
+            const acc4 = acc.accountNumber.slice(-4);
+            if (acc4 === suffix4 && acc.bank === bankKey) {
+              matched = true;
+              return { ...acc, balance: parsed.balance!, lastUpdated: new Date().toISOString() };
             }
             return acc;
           });
+          if (!matched) {
+            // Auto-create account for this bank/number
+            const BANK_COLORS: Record<string, string> = {
+              "HDFC Bank": "#003087",
+              "Saraswat Bank": "#8B1A1A",
+            };
+            updated.push({
+              id: "acc_" + Date.now(),
+              bank: bankKey,
+              accountNumber: suffix4,
+              balance: parsed.balance!,
+              lastUpdated: new Date().toISOString(),
+              color: BANK_COLORS[bankKey] ?? "#333",
+            });
+          }
           saveAccounts(updated);
           return updated;
         });
@@ -515,6 +531,17 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
       return t;
     },
     [addTransaction]
+  );
+
+  const updateTransaction = useCallback(
+    (t: Transaction) => {
+      setTransactions((prev) => {
+        const updated = prev.map((tx) => (tx.id === t.id ? t : tx));
+        saveTransactions(updated);
+        return updated;
+      });
+    },
+    []
   );
 
   const updateAccount = useCallback(
@@ -582,6 +609,7 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         reminders,
         addTransaction,
         addTransactionFromSMS,
+        updateTransaction,
         updateAccount,
         addReminder,
         updateReminder,

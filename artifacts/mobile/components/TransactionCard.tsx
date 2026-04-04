@@ -3,7 +3,6 @@ import * as Haptics from "expo-haptics";
 import React, { useRef } from "react";
 import {
   Animated,
-  I18nManager,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -38,9 +37,10 @@ interface Props {
   transaction: Transaction;
   onPress?: () => void;
   onDelete?: () => void;
+  onEdit?: () => void;
 }
 
-export default function TransactionCard({ transaction, onPress, onDelete }: Props) {
+export default function TransactionCard({ transaction, onPress, onDelete, onEdit }: Props) {
   const colors = useColors();
   const categoryInfo = CATEGORY_ICONS[transaction.category] ?? CATEGORY_ICONS["Other"];
   const isCredit = transaction.type === "credit";
@@ -62,6 +62,13 @@ export default function TransactionCard({ transaction, onPress, onDelete }: Prop
     onDelete?.();
   };
 
+  const handleEdit = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    swipeableRef.current?.close();
+    onEdit?.();
+  };
+
+  // Swipe LEFT → Delete (red)
   const renderRightActions = (
     progress: Animated.AnimatedInterpolation<number>,
     dragX: Animated.AnimatedInterpolation<number>
@@ -75,17 +82,38 @@ export default function TransactionCard({ transaction, onPress, onDelete }: Prop
       inputRange: [0, 0.5, 1],
       outputRange: [0, 0.7, 1],
     });
-
     return (
-      <Animated.View style={[styles.deleteAction, { opacity }]}>
+      <Animated.View style={[styles.actionWrapper, styles.deleteAction, { opacity }]}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={handleDelete}
-            activeOpacity={0.8}
-          >
+          <TouchableOpacity style={styles.actionBtn} onPress={handleDelete} activeOpacity={0.8}>
             <Feather name="trash-2" size={20} color="#fff" />
-            <Text style={styles.deleteText}>Delete</Text>
+            <Text style={styles.actionText}>Delete</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </Animated.View>
+    );
+  };
+
+  // Swipe RIGHT → Edit (blue)
+  const renderLeftActions = (
+    progress: Animated.AnimatedInterpolation<number>,
+    dragX: Animated.AnimatedInterpolation<number>
+  ) => {
+    const scale = dragX.interpolate({
+      inputRange: [0, 60, 100],
+      outputRange: [0.8, 0.9, 1],
+      extrapolate: "clamp",
+    });
+    const opacity = progress.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0, 0.7, 1],
+    });
+    return (
+      <Animated.View style={[styles.actionWrapper, styles.editAction, { opacity }]}>
+        <Animated.View style={{ transform: [{ scale }] }}>
+          <TouchableOpacity style={styles.actionBtn} onPress={handleEdit} activeOpacity={0.8}>
+            <Feather name="edit-2" size={20} color="#fff" />
+            <Text style={styles.actionText}>Edit</Text>
           </TouchableOpacity>
         </Animated.View>
       </Animated.View>
@@ -95,16 +123,16 @@ export default function TransactionCard({ transaction, onPress, onDelete }: Prop
   return (
     <Swipeable
       ref={swipeableRef}
-      renderRightActions={renderRightActions}
+      renderRightActions={onDelete ? renderRightActions : undefined}
+      renderLeftActions={onEdit ? renderLeftActions : undefined}
       rightThreshold={80}
+      leftThreshold={80}
       onSwipeableOpen={(direction) => {
-        if (direction === "right") return;
-        // Swiped fully left — auto delete
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        // Small delay for visual feedback
-        setTimeout(() => {
-          onDelete?.();
-        }, 200);
+        if (direction === "left") {
+          // Fully swiped left → auto delete
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          setTimeout(() => onDelete?.(), 200);
+        }
       }}
       friction={2}
       overshootFriction={8}
@@ -115,9 +143,7 @@ export default function TransactionCard({ transaction, onPress, onDelete }: Prop
         onPress={onPress}
         activeOpacity={0.7}
       >
-        <View
-          style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}
-        >
+        <View style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}>
           <Feather name={categoryInfo.icon as any} size={20} color={categoryInfo.color} />
         </View>
         <View style={styles.info}>
@@ -129,12 +155,7 @@ export default function TransactionCard({ transaction, onPress, onDelete }: Prop
           </Text>
         </View>
         <View style={styles.right}>
-          <Text
-            style={[
-              styles.amount,
-              { color: isCredit ? "#4CD964" : colors.foreground },
-            ]}
-          >
+          <Text style={[styles.amount, { color: isCredit ? "#4CD964" : colors.foreground }]}>
             {isCredit ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
           </Text>
           <Text style={[styles.date, { color: colors.mutedForeground }]}>
@@ -167,46 +188,34 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 12,
   },
-  info: {
-    flex: 1,
-  },
-  merchant: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: 3,
-  },
-  category: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  right: {
-    alignItems: "flex-end",
-  },
-  amount: {
-    fontSize: 15,
-    fontFamily: "Inter_600SemiBold",
-    marginBottom: 3,
-  },
-  date: {
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  deleteAction: {
+  info: { flex: 1 },
+  merchant: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  category: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  right: { alignItems: "flex-end" },
+  amount: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginBottom: 3 },
+  date: { fontSize: 12, fontFamily: "Inter_400Regular" },
+  actionWrapper: {
     width: 90,
-    backgroundColor: "#EF5350",
     justifyContent: "center",
     alignItems: "center",
     borderRadius: 14,
+  },
+  deleteAction: {
+    backgroundColor: "#EF5350",
     marginLeft: 8,
   },
-  deleteBtn: {
+  editAction: {
+    backgroundColor: "#5C6BC0",
+    marginRight: 8,
+  },
+  actionBtn: {
     alignItems: "center",
     justifyContent: "center",
     gap: 4,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  deleteText: {
+  actionText: {
     color: "#fff",
     fontSize: 11,
     fontFamily: "Inter_600SemiBold",

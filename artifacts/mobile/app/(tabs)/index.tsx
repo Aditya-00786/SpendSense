@@ -14,10 +14,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import AddOptionsSheet from "@/components/AddOptionsSheet";
 import AddTransactionModal from "@/components/AddTransactionModal";
 import DonutChart from "@/components/DonutChart";
+import EditTransactionSheet from "@/components/EditTransactionSheet";
 import MonthPickerModal from "@/components/MonthPickerModal";
 import SMSParser from "@/components/SMSParser";
 import TransactionCard from "@/components/TransactionCard";
-import { useData } from "@/context/DataContext";
+import { Transaction, useData } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
 const CHART_COLORS = ["#4CD964", "#5C6BC0", "#26C6DA", "#FFA726", "#EF5350", "#AB47BC"];
@@ -25,7 +26,7 @@ const CHART_COLORS = ["#4CD964", "#5C6BC0", "#26C6DA", "#FFA726", "#EF5350", "#A
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, deleteTransaction } = useData();
+  const { transactions, accounts, deleteTransaction, updateTransaction } = useData();
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
@@ -35,6 +36,7 @@ export default function HomeScreen() {
   const [showSMS, setShowSMS] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString("default", { month: "long" });
 
