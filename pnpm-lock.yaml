@@ -157,6 +157,9 @@ importers:
       expo:
         specifier: ^55.0.11
         version: 55.0.11(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
+      expo-local-authentication:
+        specifier: ~17.0.8
+        version: 17.0.8(expo@55.0.11)
     devDependencies:
       '@types/react':
         specifier: ~19.2.10
@@ -9926,6 +9929,11 @@ snapshots:
   expo-local-authentication@17.0.8(expo@54.0.33):
     dependencies:
       expo: 54.0.33(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      invariant: 2.2.4
+
+  expo-local-authentication@17.0.8(expo@55.0.11):
+    dependencies:
+      expo: 55.0.11(@babel/core@7.29.0)(@expo/dom-webview@55.0.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.23)(react-dom@19.1.0(react@19.1.0))(react-native@0.81.5(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.1.0))(react@19.1.0)(typescript@5.9.3)
       invariant: 2.2.4
 
   expo-location@19.0.8(expo@54.0.33):

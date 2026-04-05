@@ -15,6 +15,7 @@
     "typescript": "~5.9.2"
   },
   "dependencies": {
-    "expo": "^55.0.11"
+    "expo": "^55.0.11",
+    "expo-local-authentication": "~17.0.8"
   }
 }
