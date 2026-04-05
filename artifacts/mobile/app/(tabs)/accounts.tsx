@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -33,6 +34,7 @@ import { Image } from "expo-image";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import StatementSheet from "@/components/StatementSheet";
 import TransactionFilter, { FilterMode, FilterTrigger, useTransactionFilter } from "@/components/TransactionFilter";
+import { useAuth } from "@/context/AuthContext";
 import { Account, Transaction, useData } from "@/context/DataContext";
 import TransactionDetailSheet from "@/components/TransactionDetailSheet";
 import { useColors } from "@/hooks/useColors";
@@ -313,6 +315,7 @@ export default function AccountsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const { accounts, transactions, updateAccount, deleteAccount, settings } = useData();
+  const { isBiometricEnabled, isBiometricSupported, biometricType, setBiometricEnabled, authenticate } = useAuth();
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -515,6 +518,44 @@ export default function AccountsScreen() {
           </Animated.View>
         )}
 
+        {/* Security Section */}
+        {!selectedId && (isBiometricSupported || Platform.OS === "web") && (
+          <Animated.View entering={FadeInDown.delay(150).duration(300)}>
+            <Text style={[styles.sectionLabel, { color: colors.mutedForeground, marginTop: 8 }]}>Security</Text>
+            <View style={[styles.securityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.securityRow}>
+                <View style={[styles.securityIcon, { backgroundColor: "#4CD96420" }]}>
+                  <Feather name="smile" size={18} color="#4CD964" />
+                </View>
+                <View style={styles.securityInfo}>
+                  <Text style={[styles.securityTitle, { color: colors.foreground }]}>
+                    {biometricType === "face" ? "Face ID" : biometricType === "fingerprint" ? "Touch ID" : "Biometric Lock"}
+                  </Text>
+                  <Text style={[styles.securitySub, { color: colors.mutedForeground }]}>
+                    {isBiometricEnabled ? "App locks when you leave" : "Lock SpendSense with biometrics"}
+                  </Text>
+                </View>
+                <Switch
+                  value={isBiometricEnabled}
+                  onValueChange={async (val) => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    if (val) {
+                      // Require authentication before enabling
+                      const ok = await authenticate();
+                      if (ok) await setBiometricEnabled(true);
+                    } else {
+                      await setBiometricEnabled(false);
+                    }
+                  }}
+                  trackColor={{ false: colors.border, true: "#4CD96480" }}
+                  thumbColor={isBiometricEnabled ? "#4CD964" : colors.mutedForeground}
+                  ios_backgroundColor={colors.border}
+                />
+              </View>
+            </View>
+          </Animated.View>
+        )}
+
       </ScrollView>
 
       {/* Transaction Details Modal */}
@@ -565,6 +606,12 @@ const styles = StyleSheet.create({
   actionGridIcon: { width: 48, height: 48, borderRadius: 24, justifyContent: "center", alignItems: "center", shadowColor: "#000", shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 8, elevation: 5 },
   actionGridText: { fontSize: 10, fontFamily: "Inter_600SemiBold", marginTop: 8, textAlign: "center" },
 
+  securityCard: { borderRadius: 16, borderWidth: 1, marginBottom: 16, overflow: "hidden" },
+  securityRow: { flexDirection: "row", alignItems: "center", gap: 12, padding: 16 },
+  securityIcon: { width: 40, height: 40, borderRadius: 12, alignItems: "center", justifyContent: "center" },
+  securityInfo: { flex: 1 },
+  securityTitle: { fontSize: 15, fontFamily: "Inter_600SemiBold", marginBottom: 2 },
+  securitySub: { fontSize: 12, fontFamily: "Inter_400Regular" },
   summaryRow: { borderRadius: 14, padding: 14, marginBottom: 10, borderWidth: 1 },
   summaryBar: { height: 6, borderRadius: 3, marginBottom: 10, overflow: "hidden" },
   summaryFill: { height: 6, borderRadius: 3 },

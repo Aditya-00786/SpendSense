@@ -12,6 +12,8 @@ import React, { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import LockScreen from "@/components/LockScreen";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { DataProvider } from "@/context/DataContext";
 
 SplashScreen.preventAutoHideAsync();
@@ -23,6 +25,16 @@ function RootLayoutNav() {
     <Stack screenOptions={{ headerBackTitle: "Back" }}>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
+  );
+}
+
+function AppWithAuth() {
+  const { isLocked } = useAuth();
+  return (
+    <>
+      <RootLayoutNav />
+      {isLocked && <LockScreen />}
+    </>
   );
 }
 
@@ -47,9 +59,11 @@ export default function RootLayout() {
       <ErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <DataProvider>
-            <GestureHandlerRootView style={{ flex: 1 }}>
-              <RootLayoutNav />
-            </GestureHandlerRootView>
+            <AuthProvider>
+              <GestureHandlerRootView style={{ flex: 1 }}>
+                <AppWithAuth />
+              </GestureHandlerRootView>
+            </AuthProvider>
           </DataProvider>
         </QueryClientProvider>
       </ErrorBoundary>
