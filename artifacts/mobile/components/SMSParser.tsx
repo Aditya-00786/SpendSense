@@ -69,12 +69,21 @@ export default function SMSParser({ onClose }: Props) {
       return;
     }
     const transaction = addTransactionFromSMS(smsText.trim());
-    if (transaction) {
+    if (transaction === "duplicate") {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      setResult("Duplicate Sync. This transaction has already been synced to your account.");
+      Alert.alert(
+        "Duplicate Sync",
+        "This transaction has already been synced to your account.",
+        [{ text: "OK", onPress: () => setTimeout(onClose, 400) }]
+      );
+    } else if (transaction) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setResult(
         `✓ Added ${transaction.type === "debit" ? "expense" : "income"} of ₹${transaction.amount.toLocaleString("en-IN")} from ${transaction.merchant}`
       );
       setSmsText("");
+      setTimeout(onClose, 800);
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       setResult("Could not parse this SMS. Supported: Saraswat Bank & HDFC Bank.");

@@ -1,5 +1,7 @@
+import * as Haptics from "expo-haptics";
 import { Feather } from "@expo/vector-icons";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   Platform,
   ScrollView,
@@ -11,8 +13,13 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import BarChart from "@/components/BarChart";
 import DonutChart from "@/components/DonutChart";
-import TransactionCard from "@/components/TransactionCard";
-import { useData } from "@/context/DataContext";
+import TransactionCard, { CATEGORY_ICONS } from "@/components/TransactionCard";
+import CategoryMerchantDetailSheet from "@/components/CategoryMerchantDetailSheet";
+import EditTransactionSheet from "@/components/EditTransactionSheet";
+import TransactionDetailSheet from "@/components/TransactionDetailSheet";
+import TransactionFilter, { FilterMode, FilterTrigger, useTransactionFilter } from "@/components/TransactionFilter";
+import MonthPickerModal from "@/components/MonthPickerModal";
+import { useData, Transaction } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
 const CHART_COLORS = ["#4CD964", "#5C6BC0", "#26C6DA", "#FFA726", "#EF5350", "#AB47BC", "#FF7043", "#26A69A"];
@@ -20,35 +27,35 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 type ViewMode = "Transactions" | "Categories" | "Merchants";
 
-const CATEGORY_BUDGETS: Record<string, number> = {
-  "Food & Dining": 5000,
-  Transport: 3000,
-  Shopping: 3000,
-  Entertainment: 6000,
-  Utilities: 2000,
-  Healthcare: 2000,
-  Education: 2000,
-  Travel: 3500,
-  Transfer: 0,
-  Other: 2000,
-};
-
 export default function AnalyticsScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { transactions, deleteTransaction } = useData();
+  const { transactions, deleteTransaction, updateTransaction, settings } = useData();
   const [view, setView] = useState<ViewMode>("Categories");
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [viewingTx, setViewingTx] = useState<Transaction | null>(null);
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
-  const currentMonth = new Date().getMonth();
-  const currentYear = new Date().getFullYear();
+  const now = new Date();
+  const [currentMonth, setCurrentMonth] = useState(now.getMonth());
+  const [currentYear, setCurrentYear] = useState(now.getFullYear());
+  const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const { filter: txFilter, setFilter: setTxFilter, isExpanded, setIsExpanded } = useTransactionFilter();
+  const [detailSelection, setDetailSelection] = useState<{ title: string; type: "category" | "merchant" } | null>(null);
+
+  const scrollRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    }, [])
+  );
 
   const thisMonthTx = useMemo(
     () => transactions.filter((t) => {
       const d = new Date(t.date);
       return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
     }),
-    [transactions]
+    [transactions, currentMonth, currentYear]
   );
 
   const totalSpend = useMemo(
@@ -60,64 +67,129 @@ export default function AnalyticsScreen() {
     [thisMonthTx]
   );
 
+  const detailTransactions = useMemo(() => {
+    if (!detailSelection) return [];
+    return thisMonthTx.filter((t) => {
+      if (txFilter === "debit" && t.type !== "debit") return false;
+      if (txFilter === "credit" && t.type !== "credit") return false;
+      return detailSelection.type === "category" ? t.category === detailSelection.title : t.merchant === detailSelection.title;
+    });
+  }, [thisMonthTx, txFilter, detailSelection]);
+
   const categoryBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
-    thisMonthTx.filter((t) => t.type === "debit").forEach((t) => {
-      map[t.category] = (map[t.category] ?? 0) + t.amount;
+    thisMonthTx.forEach((t) => {
+      if (txFilter === "debit" && t.type !== "debit") return;
+      if (txFilter === "credit" && t.type !== "credit") return;
+      map[t.category] = (map[t.category] ?? 0) + Math.abs(t.amount);
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
-  }, [thisMonthTx]);
+  }, [thisMonthTx, txFilter]);
 
   const merchantBreakdown = useMemo(() => {
     const map: Record<string, number> = {};
-    thisMonthTx.filter((t) => t.type === "debit").forEach((t) => {
-      map[t.merchant] = (map[t.merchant] ?? 0) + t.amount;
+    thisMonthTx.forEach((t) => {
+      if (txFilter === "debit" && t.type !== "debit") return;
+      if (txFilter === "credit" && t.type !== "credit") return;
+      map[t.merchant] = (map[t.merchant] ?? 0) + Math.abs(t.amount);
     });
     return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  }, [thisMonthTx]);
+  }, [thisMonthTx, txFilter]);
 
   const monthlyData = useMemo(() => {
-    const data: { label: string; value: number }[] = [];
+    const data: { label: string; value: number; color?: string }[] = [];
     for (let i = 5; i >= 0; i--) {
       const d = new Date(currentYear, currentMonth - i, 1);
       const m = d.getMonth();
       const y = d.getFullYear();
-      const spend = transactions
-        .filter((t) => {
-          const td = new Date(t.date);
-          return td.getMonth() === m && td.getFullYear() === y && t.type === "debit";
-        })
-        .reduce((s, t) => s + t.amount, 0);
-      data.push({ label: MONTHS[m], value: spend });
+
+      let debits = 0;
+      let credits = 0;
+      transactions.forEach((t) => {
+        const td = new Date(t.date);
+        if (td.getMonth() === m && td.getFullYear() === y) {
+          if (t.type === "debit") debits += t.amount;
+          if (t.type === "credit") credits += t.amount;
+        }
+      });
+
+      let val = 0;
+      let clr = undefined;
+
+      if (txFilter === "debit") {
+        val = debits;
+      } else if (txFilter === "credit") {
+        val = credits;
+      } else {
+        const net = credits - debits;
+        val = Math.abs(net);
+        if (!settings.showNetMultiColorTrends) {
+          clr = net >= 0 ? "#4CD964" : "#EF5350";
+        }
+      }
+
+      data.push({ label: MONTHS[m].substring(0, 3), value: val, color: clr });
     }
     return data;
-  }, [transactions]);
+  }, [transactions, currentMonth, currentYear, txFilter, settings.showNetMultiColorTrends]);
 
-  const segments = categoryBreakdown.slice(0, 6).map(([label, value], i) => ({
-    label,
-    value,
-    color: CHART_COLORS[i],
-  }));
+  const segments = useMemo(() => {
+    if (txFilter === "all" && !settings.showNetCategoryBreakdown) {
+      return [
+        { label: "Income", value: totalIncome, color: "#4CD964" },
+        { label: "Spendings", value: totalSpend, color: "#EF5350" }
+      ].filter(s => s.value > 0);
+    }
+
+    const breakdown = categoryBreakdown;
+    const palette = CHART_COLORS;
+
+    return breakdown.map(([label, value], i) => ({
+      label,
+      value,
+      color: palette[i % palette.length],
+    }));
+  }, [categoryBreakdown, txFilter, totalSpend, totalIncome, settings.showNetCategoryBreakdown]);
+
+  const totalVolume = txFilter === "debit" ? totalSpend : txFilter === "credit" ? totalIncome : totalSpend + totalIncome;
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.content, { paddingTop: topInset + 16, paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Analytics</Text>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <Text style={[styles.pageTitle, { color: colors.foreground, marginBottom: 0 }]}>Analytics</Text>
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <FilterTrigger isExpanded={isExpanded} onPress={() => setIsExpanded(!isExpanded)} size={40} />
+            <TouchableOpacity
+              style={[styles.iconBtn, { backgroundColor: colors.card }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                setShowMonthPicker(true);
+              }}
+              activeOpacity={0.7}
+            >
+              <Feather name="calendar" size={18} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <TransactionFilter filter={txFilter} onFilterChange={setTxFilter} isExpanded={isExpanded} allLabel="Net" />
 
         {/* Donut + Stats */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.mutedForeground }]}>
-            Spent in {MONTHS[currentMonth]}
+            {txFilter === "credit" ? "Received in" : txFilter === "debit" ? "Spent in" : "Net Flow in"} {MONTHS[currentMonth]}
           </Text>
           <View style={styles.donutRow}>
             <DonutChart
               segments={segments}
-              total={Math.max(totalIncome, totalSpend, 1)}
-              centerLabel={`₹${(totalSpend / 1000).toFixed(1)}k`}
-              centerSub={totalIncome > 0 ? `${Math.round((totalSpend / totalIncome) * 100)}%` : ""}
+              total={Math.max(totalVolume, 1)}
+              centerLabel={txFilter === "credit" ? `₹${(totalIncome / 1000).toFixed(1)}k` : txFilter === "debit" ? `₹${(totalSpend / 1000).toFixed(1)}k` : `₹${(((totalIncome - totalSpend) / 1000) >= 0 ? "+" : "") + ((totalIncome - totalSpend) / 1000).toFixed(1)}k`}
+              centerSub={txFilter === "debit" && settings.showDebitIncomePct ? (totalIncome > 0 ? `${Math.round((totalSpend / totalIncome) * 100)}% of income` : "") : ""}
               size={180}
               strokeWidth={22}
             />
@@ -129,21 +201,25 @@ export default function AnalyticsScreen() {
                     {seg.label}
                   </Text>
                   <Text style={[styles.legendPct, { color: colors.foreground }]}>
-                    {Math.round((seg.value / totalSpend) * 100)}%
+                    {Math.round((seg.value / Math.max(totalVolume, 1)) * 100)}%
                   </Text>
                 </View>
               ))}
             </View>
           </View>
           <View style={styles.statRow}>
-            <View style={styles.statItem}>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>+ Income</Text>
-              <Text style={[styles.statValue, { color: "#4CD964" }]}>₹{totalIncome.toLocaleString("en-IN")}</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>— Budget</Text>
-              <Text style={[styles.statValue, { color: colors.foreground }]}>₹30,000</Text>
-            </View>
+            {txFilter !== "credit" && (
+              <View style={styles.statItem}>
+                <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>- Spent</Text>
+                <Text style={[styles.statValue, { color: "#EF5350" }]}>₹{totalSpend.toLocaleString("en-IN")}</Text>
+              </View>
+            )}
+            {txFilter !== "debit" && (
+              <View style={styles.statItem}>
+                <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>+ Received</Text>
+                <Text style={[styles.statValue, { color: "#4CD964" }]}>₹{totalIncome.toLocaleString("en-IN")}</Text>
+              </View>
+            )}
           </View>
         </View>
 
@@ -152,7 +228,7 @@ export default function AnalyticsScreen() {
           <Text style={[styles.cardTitle, { color: colors.foreground }]}>Trends by month</Text>
           <View style={styles.barChartWrapper}>
             <BarChart
-              data={monthlyData.map((d, i) => ({ ...d, color: CHART_COLORS[i % CHART_COLORS.length] }))}
+              data={monthlyData.map((d, i) => ({ ...d, color: d.color ?? CHART_COLORS[i % CHART_COLORS.length] }))}
               height={100}
             />
           </View>
@@ -178,49 +254,27 @@ export default function AnalyticsScreen() {
         {view === "Categories" && (
           <View>
             {categoryBreakdown.map(([category, amount], i) => {
-              const budget = CATEGORY_BUDGETS[category] ?? 2000;
-              const pct = budget > 0 ? Math.min(amount / budget, 1) : 0;
-              const overBudget = budget > 0 && amount > budget;
               return (
-                <View
+                <TouchableOpacity
                   key={category}
                   style={[styles.categoryRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  activeOpacity={0.7}
+                  onPress={() => setDetailSelection({ title: category, type: "category" })}
                 >
-                  <View style={[styles.catIcon, { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + "25" }]}>
-                    <View style={[styles.catDot, { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }]} />
+                  <View style={[styles.catIcon, { backgroundColor: (CATEGORY_ICONS[category]?.color ?? CATEGORY_ICONS["Other"].color) + "25" }]}>
+                    <Feather name={(CATEGORY_ICONS[category]?.icon ?? CATEGORY_ICONS["Other"].icon) as any} size={20} color={CATEGORY_ICONS[category]?.color ?? CATEGORY_ICONS["Other"].color} />
                   </View>
                   <View style={styles.catInfo}>
                     <View style={styles.catHeader}>
                       <Text style={[styles.catName, { color: colors.foreground }]}>{category}</Text>
                       <View style={styles.catAmounts}>
-                        <Text style={[styles.catAmount, { color: overBudget ? "#EF5350" : colors.foreground }]}>
+                        <Text style={[styles.catAmount, { color: colors.foreground }]}>
                           ₹{amount.toLocaleString("en-IN")}
                         </Text>
-                        {overBudget && (
-                          <Feather name="alert-circle" size={14} color="#EF5350" style={{ marginLeft: 4 }} />
-                        )}
                       </View>
                     </View>
-                    {budget > 0 && (
-                      <>
-                        <View style={[styles.budgetBar, { backgroundColor: colors.muted }]}>
-                          <View
-                            style={[
-                              styles.budgetFill,
-                              {
-                                width: `${pct * 100}%`,
-                                backgroundColor: overBudget ? "#EF5350" : CHART_COLORS[i % CHART_COLORS.length],
-                              },
-                            ]}
-                          />
-                        </View>
-                        <Text style={[styles.budgetLabel, { color: colors.mutedForeground }]}>
-                          Budget: ₹{budget.toLocaleString("en-IN")}
-                        </Text>
-                      </>
-                    )}
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
           </View>
@@ -233,7 +287,9 @@ export default function AnalyticsScreen() {
               <TransactionCard
                 key={tx.id}
                 transaction={tx}
+                onPress={() => setViewingTx(tx)}
                 onDelete={() => deleteTransaction(tx.id)}
+                onEdit={() => setEditingTx(tx)}
               />
             ))}
           </View>
@@ -243,12 +299,14 @@ export default function AnalyticsScreen() {
         {view === "Merchants" && (
           <View>
             {merchantBreakdown.map(([merchant, amount], i) => (
-              <View
+              <TouchableOpacity
                 key={merchant}
                 style={[styles.categoryRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                activeOpacity={0.7}
+                onPress={() => setDetailSelection({ title: merchant, type: "merchant" })}
               >
                 <View style={[styles.catIcon, { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] + "25" }]}>
-                  <View style={[styles.catDot, { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }]} />
+                  <Text style={{ color: CHART_COLORS[i % CHART_COLORS.length], fontSize: 20, fontFamily: "Inter_700Bold", textTransform: "uppercase" }}>{merchant.charAt(0)}</Text>
                 </View>
                 <View style={styles.catInfo}>
                   <View style={styles.catHeader}>
@@ -257,10 +315,10 @@ export default function AnalyticsScreen() {
                       ₹{amount.toLocaleString("en-IN")}
                     </Text>
                   </View>
-                  <View style={[styles.budgetBar, { backgroundColor: colors.muted }]}>
+                  <View style={[styles.relativeBar, { backgroundColor: colors.muted }]}>
                     <View
                       style={[
-                        styles.budgetFill,
+                        styles.relativeFill,
                         {
                           width: `${(amount / (merchantBreakdown[0]?.[1] ?? 1)) * 100}%`,
                           backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
@@ -269,11 +327,48 @@ export default function AnalyticsScreen() {
                     />
                   </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             ))}
           </View>
         )}
       </ScrollView>
+
+      {/* Edit Transaction Sheet */}
+      {editingTx && (
+        <EditTransactionSheet
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          onSave={(updated) => updateTransaction(updated)}
+        />
+      )}
+
+      {/* View Transaction Details Sheet */}
+      <TransactionDetailSheet
+        transaction={viewingTx}
+        onClose={() => setViewingTx(null)}
+      />
+
+      <CategoryMerchantDetailSheet
+        visible={!!detailSelection}
+        title={detailSelection?.title || ""}
+        type={detailSelection?.type || "category"}
+        transactions={detailTransactions}
+        filterMode={txFilter}
+        onClose={() => setDetailSelection(null)}
+        onDelete={deleteTransaction}
+        onEdit={setEditingTx}
+      />
+
+      <MonthPickerModal
+        visible={showMonthPicker}
+        selectedMonth={currentMonth}
+        selectedYear={currentYear}
+        onSelect={(m, y) => {
+          setCurrentMonth(m);
+          setCurrentYear(y);
+        }}
+        onClose={() => setShowMonthPicker(false)}
+      />
     </View>
   );
 }
@@ -282,6 +377,13 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   content: { paddingHorizontal: 20 },
   pageTitle: { fontSize: 28, fontFamily: "Inter_700Bold", marginBottom: 20 },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   card: {
     borderRadius: 18,
     padding: 18,
@@ -346,9 +448,8 @@ const styles = StyleSheet.create({
   catName: { fontSize: 15, fontFamily: "Inter_600SemiBold" },
   catAmounts: { flexDirection: "row", alignItems: "center" },
   catAmount: { fontSize: 15, fontFamily: "Inter_700Bold" },
-  budgetBar: { height: 4, borderRadius: 2, marginBottom: 4, overflow: "hidden" },
-  budgetFill: { height: 4, borderRadius: 2 },
-  budgetLabel: { fontSize: 11, fontFamily: "Inter_400Regular" },
+  relativeBar: { height: 4, borderRadius: 2, overflow: "hidden" },
+  relativeFill: { height: 4, borderRadius: 2 },
   txRow: {
     flexDirection: "row",
     justifyContent: "space-between",

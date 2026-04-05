@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   Alert,
   Modal,
@@ -52,6 +53,13 @@ export default function RemindersScreen() {
   const { reminders, updateReminder, deleteReminder } = useData();
   const [showAdd, setShowAdd] = useState(false);
   const topInset = Platform.OS === "web" ? 67 : insets.top;
+
+  const scrollRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    }, [])
+  );
 
   const pending = useMemo(
     () =>
@@ -149,6 +157,7 @@ export default function RemindersScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={[styles.content, { paddingTop: topInset + 16, paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
       >

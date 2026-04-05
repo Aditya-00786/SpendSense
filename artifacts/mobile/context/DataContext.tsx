@@ -6,6 +6,7 @@ import React, {
   useEffect,
   useState,
 } from "react";
+import { Alert, Platform, ToastAndroid } from "react-native";
 
 export type TransactionType = "debit" | "credit";
 
@@ -21,6 +22,7 @@ export interface Transaction {
   accountNumber: string;
   rawSMS?: string;
   note?: string;
+  refNo?: string;
 }
 
 export interface Account {
@@ -29,7 +31,17 @@ export interface Account {
   accountNumber: string;
   balance: number;
   lastUpdated: string;
+  lastFirmBalanceDate?: string; // Tracks the newest timestamp a definitive balance was established
+  fallbackBalanceUpdate?: boolean; // Determines if missing explicit balance updates are differentially padded
   color: string;
+}
+
+export interface AppSettings {
+  name: string;
+  currencySymbol: string;
+  showNetCategoryBreakdown?: boolean;
+  showNetMultiColorTrends?: boolean;
+  showDebitIncomePct?: boolean;
 }
 
 export interface Reminder {
@@ -107,10 +119,15 @@ function extractAccSuffix(raw: string): string {
 
 // Parse date "03-04-2026" from various formats, returns ISO date string
 function parseDate(raw: string): string {
-  const parts = raw.trim().split("-");
+  const parts = raw.trim().split(/[-/]/);
   if (parts.length === 3) {
-    const [d, m, y] = parts;
-    if (y && y.length === 4) return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    let [d, m, y] = parts;
+    if (y && y.length === 2) {
+      y = "20" + y;
+    }
+    if (y && y.length === 4) {
+      return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+    }
   }
   return raw;
 }
@@ -118,7 +135,7 @@ function parseDate(raw: string): string {
 function parseSaraswatDebit(sms: string): Partial<Transaction> | null {
   // New format: "Your a/c no. XX9302 is debited for Rs.899.00 on 03-04-2026 23:16:18 and credited to vpa snitchapparels1.rzp@hdfcbank"
   const newDebit = sms.match(
-    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-]+)/i
+    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
   );
   if (newDebit) {
     const vpaMatch = sms.match(/credited to vpa\s+(\S+)/i);
@@ -207,7 +224,7 @@ function parseSaraswatCredit(sms: string): Partial<Transaction> | null {
 function parseHDFCDebit(sms: string): Partial<Transaction> | null {
   // New format (same structure as Saraswat debit but ends with "- HDFC Bank" or contains "HDFC")
   const newDebit = sms.match(
-    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-]+)/i
+    /a\/c no\.\s*(XX\d+|\d+)\s+is debited for Rs\.([\d,]+(?:\.\d+)?)\s+on\s+([\d-\/]+)/i
   );
   if (newDebit) {
     const vpaMatch = sms.match(/credited to vpa\s+(\S+)/i);
@@ -246,24 +263,67 @@ function parseHDFCDebit(sms: string): Partial<Transaction> | null {
   return null;
 }
 
+function parseHFDCCredit(sms: string): Partial<Transaction> | null {
+  const match = sms.match(/Rs\.([\d,]+(?:\.\d+)?)\s+credited to.*A\/c\s+(XX\d+|\d+)\s+on\s+([\d-\/]+)/i);
+  if (match) {
+    const vpaMatch = sms.match(/from VPA\s+([^\s]+)/i);
+    const fromMatch = sms.match(/from\s+([^\(]+?)\s*(?:\(UPI|$)/i);
+    const balanceMatch = sms.match(/Current Balance is INR\s+([\d,]+(?:\.\d+)?)/i);
+    
+    let rawMerchant = "Unknown";
+    if (vpaMatch) rawMerchant = cleanVPAMerchant(vpaMatch[1]);
+    else if (fromMatch) rawMerchant = fromMatch[1].trim();
+
+    return {
+      type: "credit",
+      accountNumber: extractAccSuffix(match[2]),
+      amount: parseFloat(match[1].replace(/,/g, "")),
+      date: parseDate(match[3]),
+      merchant: rawMerchant,
+      balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, "")) : undefined,
+      bank: "HDFC Bank",
+      category: detectCategory(rawMerchant),
+    };
+  }
+  return null;
+}
+
 export function parseSMS(smsText: string): Partial<Transaction> | null {
   const lower = smsText.toLowerCase();
 
   // Detect bank from SMS footer
   const isSaraswat = lower.includes("saraswat");
   const isHDFC = lower.includes("hdfc");
+  
+  let parsed: Partial<Transaction> | null = null;
 
   if (isSaraswat) {
-    if (lower.includes("debited")) return parseSaraswatDebit(smsText);
-    if (lower.includes("credited")) return parseSaraswatCredit(smsText);
+    if (lower.includes("debited")) parsed = parseSaraswatDebit(smsText);
+    else if (lower.includes("credited")) parsed = parseSaraswatCredit(smsText);
   }
 
-  if (isHDFC) {
-    if (lower.includes("sent rs")) return parseHDFCDebit(smsText);
-    if (lower.includes("debited")) return parseHDFCDebit(smsText);
+  if (isHDFC && !parsed) {
+    if (lower.includes("sent rs")) parsed = parseHDFCDebit(smsText);
+    else if (lower.includes("debited")) parsed = parseHDFCDebit(smsText);
+    else if (lower.includes("credited")) parsed = parseHFDCCredit(smsText);
   }
 
-  return null;
+  if (parsed) {
+    const patterns = [
+      /(?:UPI(?: Ref\.?\s*No\.?)?)[\s-:\/]*([A-Za-z0-9]{6,15})/i,
+      /(?:Ref\.?\s*No\.?|Ref|UTR)[\s-:\/]*([A-Za-z0-9]{6,15})/i,
+      /IMPS(?:[\s-]+[A-Za-z\s]+[\s-]+|[\s-:]*)([A-Za-z0-9]{6,15})/i
+    ];
+    for (const p of patterns) {
+      const match = smsText.match(p);
+      if (match) {
+        parsed.refNo = match[1];
+        break;
+      }
+    }
+  }
+
+  return parsed;
 }
 
 interface DataContextType {
@@ -271,14 +331,17 @@ interface DataContextType {
   accounts: Account[];
   reminders: Reminder[];
   addTransaction: (t: Transaction) => void;
-  addTransactionFromSMS: (sms: string) => Transaction | null;
+  addTransactionFromSMS: (sms: string) => Transaction | "duplicate" | null;
   updateTransaction: (t: Transaction) => void;
   updateAccount: (account: Account) => void;
   addReminder: (r: Reminder) => void;
   updateReminder: (r: Reminder) => void;
   deleteReminder: (id: string) => void;
   deleteTransaction: (id: string) => void;
+  deleteAccount: (id: string) => void;
   categories: string[];
+  settings: AppSettings;
+  updateSettings: (s: AppSettings) => void;
   isLoading: boolean;
 }
 
@@ -435,6 +498,8 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
     useState<Transaction[]>(DEMO_TRANSACTIONS);
   const [accounts, setAccounts] = useState<Account[]>(DEMO_ACCOUNTS);
   const [reminders, setReminders] = useState<Reminder[]>(DEMO_REMINDERS);
+  const [merchantRules, setMerchantRules] = useState<Record<string, { merchant: string; category: string }>>({});
+  const [settings, setSettings] = useState<AppSettings>({ name: "User", currencySymbol: "₹" });
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -443,14 +508,18 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
 
   const loadData = async () => {
     try {
-      const [txData, accData, remData] = await Promise.all([
+      const [txData, accData, remData, rulesData, settingsData] = await Promise.all([
         AsyncStorage.getItem("transactions"),
         AsyncStorage.getItem("accounts"),
         AsyncStorage.getItem("reminders"),
+        AsyncStorage.getItem("merchantRules"),
+        AsyncStorage.getItem("appSettings"),
       ]);
       if (txData) setTransactions(JSON.parse(txData));
       if (accData) setAccounts(JSON.parse(accData));
       if (remData) setReminders(JSON.parse(remData));
+      if (rulesData) setMerchantRules(JSON.parse(rulesData));
+      if (settingsData) setSettings(JSON.parse(settingsData));
     } catch {
       // use defaults
     }
@@ -479,38 +548,88 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addTransactionFromSMS = useCallback(
-    (sms: string): Transaction | null => {
+    (sms: string): Transaction | "duplicate" | null => {
       const parsed = parseSMS(sms);
       if (!parsed) return null;
+      
+      if (parsed.refNo) {
+        const isDuplicate = transactions.some((tx) => tx.refNo === parsed.refNo);
+        if (isDuplicate) {
+          return "duplicate";
+        }
+      }
+
+      let finalMerchant = parsed.merchant ?? "Unknown";
+      let finalCategory = parsed.category ?? "Other";
+      const rule = merchantRules[finalMerchant.toLowerCase()];
+      if (rule) {
+        finalMerchant = rule.merchant;
+        finalCategory = rule.category;
+      }
+
       const t: Transaction = {
         id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
         type: parsed.type ?? "debit",
         amount: parsed.amount ?? 0,
-        merchant: parsed.merchant ?? "Unknown",
-        category: parsed.category ?? "Other",
+        merchant: finalMerchant,
+        category: finalCategory,
         date: parsed.date ?? new Date().toISOString().split("T")[0],
         bank: parsed.bank ?? "Unknown",
         accountNumber: parsed.accountNumber ?? "",
         balance: parsed.balance,
         rawSMS: sms,
+        refNo: parsed.refNo,
       };
       addTransaction(t);
-      // Update or auto-create account when balance is parsed from SMS
-      if (parsed.balance !== undefined) {
+      // Update or auto-create account whenever we successfully parse a known bank and account number
+      if (t.bank && t.bank !== "Unknown" && t.accountNumber) {
         setAccounts((prev) => {
-          const suffix4 = t.accountNumber.slice(-4); // always 4 digits
+          const suffix4 = t.accountNumber.slice(-4);
           const bankKey = t.bank;
           let matched = false;
+          let modified = false;
+
+          const txDate = new Date(t.date).getTime();
+
           const updated = prev.map((acc) => {
             const acc4 = acc.accountNumber.slice(-4);
             if (acc4 === suffix4 && acc.bank === bankKey) {
               matched = true;
-              return { ...acc, balance: parsed.balance!, lastUpdated: new Date().toISOString() };
+              
+              let applyChanges = false;
+              let nextBalance = acc.balance;
+              let nextFirmDate = acc.lastFirmBalanceDate;
+              
+              const firmDate = acc.lastFirmBalanceDate ? new Date(acc.lastFirmBalanceDate).getTime() : 0;
+              
+              if (parsed.balance !== undefined) {
+                if (txDate >= firmDate) {
+                  applyChanges = true;
+                  nextBalance = parsed.balance;
+                  nextFirmDate = t.date;
+                }
+              } else if (acc.fallbackBalanceUpdate) {
+                if (txDate >= firmDate) {
+                  applyChanges = true;
+                  nextBalance += (t.type === "debit" ? -t.amount : t.amount);
+                }
+              }
+              
+              if (applyChanges) {
+                modified = true;
+                return { ...acc, balance: nextBalance, lastUpdated: new Date().toISOString(), lastFirmBalanceDate: nextFirmDate };
+              }
             }
             return acc;
           });
+
           if (!matched) {
             // Auto-create account for this bank/number
+            modified = true;
+            
+            let initialBalance = parsed.balance !== undefined ? parsed.balance : 0;
+            let initialFirmDate = parsed.balance !== undefined ? t.date : undefined;
+
             const BANK_COLORS: Record<string, string> = {
               "HDFC Bank": "#003087",
               "Saraswat Bank": "#8B1A1A",
@@ -519,19 +638,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
               id: "acc_" + Date.now(),
               bank: bankKey,
               accountNumber: suffix4,
-              balance: parsed.balance!,
+              balance: initialBalance,
               lastUpdated: new Date().toISOString(),
+              lastFirmBalanceDate: initialFirmDate,
               color: BANK_COLORS[bankKey] ?? "#333",
             });
           }
-          saveAccounts(updated);
-          return updated;
+
+          if (modified) {
+            saveAccounts(updated);
+            return updated;
+          }
+          return prev;
         });
       }
       return t;
     },
-    [addTransaction]
+    [addTransaction, merchantRules]
   );
+
+  const updateSettings = useCallback((s: AppSettings) => {
+    setSettings(s);
+    AsyncStorage.setItem("appSettings", JSON.stringify(s));
+  }, []);
 
   const updateTransaction = useCallback(
     (t: Transaction) => {
@@ -540,6 +669,29 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         saveTransactions(updated);
         return updated;
       });
+
+      if (t.rawSMS) {
+        const parsedOriginal = parseSMS(t.rawSMS);
+        if (parsedOriginal && parsedOriginal.merchant) {
+          const origMerchantLower = parsedOriginal.merchant.toLowerCase();
+          setMerchantRules((prev) => {
+            const updated = { ...prev };
+            if (
+              t.merchant === parsedOriginal.merchant &&
+              t.category === parsedOriginal.category
+            ) {
+              delete updated[origMerchantLower];
+            } else {
+              updated[origMerchantLower] = {
+                merchant: t.merchant,
+                category: t.category,
+              };
+            }
+            AsyncStorage.setItem("merchantRules", JSON.stringify(updated));
+            return updated;
+          });
+        }
+      }
     },
     []
   );
@@ -551,6 +703,35 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
           a.id === account.id ? account : a
         );
         saveAccounts(updated);
+        return updated;
+      });
+    },
+    []
+  );
+
+  const deleteAccount = useCallback(
+    (id: string) => {
+      setAccounts((prev) => {
+        const deletedAccount = prev.find((a) => a.id === id);
+        const updated = prev.filter((a) => a.id !== id);
+        saveAccounts(updated);
+
+        // Also sweep any transactions belonging to this unlinked account
+        if (deletedAccount) {
+          const deletedBank = deletedAccount.bank;
+          const deletedAcc4 = deletedAccount.accountNumber.slice(-4);
+
+          setTransactions((prevTx) => {
+            const updatedTx = prevTx.filter((tx) => {
+              const txAcc4 = tx.accountNumber ? tx.accountNumber.slice(-4) : "";
+              const match = tx.bank === deletedBank && txAcc4 === deletedAcc4;
+              return !match;
+            });
+            saveTransactions(updatedTx);
+            return updatedTx;
+          });
+        }
+
         return updated;
       });
     },
@@ -615,7 +796,10 @@ export function DataProvider({ children }: { children: React.ReactNode }) {
         updateReminder,
         deleteReminder,
         deleteTransaction,
+        deleteAccount,
         categories: CATEGORIES,
+        settings,
+        updateSettings,
         isLoading,
       }}
     >

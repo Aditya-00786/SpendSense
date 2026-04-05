@@ -1,13 +1,21 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useRef } from "react";
+import React, { useRef, useState } from "react";
 import {
   Animated,
+  Dimensions,
+  LayoutAnimation,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
+
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { Swipeable } from "react-native-gesture-handler";
 import { Transaction } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
@@ -46,6 +54,10 @@ export default function TransactionCard({ transaction, onPress, onDelete, onEdit
   const isCredit = transaction.type === "credit";
   const swipeableRef = useRef<Swipeable>(null);
 
+  const SCREEN_WIDTH = Dimensions.get("window").width;
+  const rowTranslateX = useRef(new Animated.Value(0)).current;
+  const [isDeleting, setIsDeleting] = useState(false);
+
   const formatDate = (dateStr: string) => {
     try {
       const d = new Date(dateStr);
@@ -56,10 +68,20 @@ export default function TransactionCard({ transaction, onPress, onDelete, onEdit
     }
   };
 
-  const handleDelete = () => {
+  const executeDelete = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    swipeableRef.current?.close();
-    onDelete?.();
+    setIsDeleting(true);
+    swipeableRef.current?.close(); // attempt to stop springing
+    
+    // Animate row completely off left edge
+    Animated.timing(rowTranslateX, {
+      toValue: -SCREEN_WIDTH,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      onDelete?.();
+    });
   };
 
   const handleEdit = () => {
@@ -85,7 +107,7 @@ export default function TransactionCard({ transaction, onPress, onDelete, onEdit
     return (
       <Animated.View style={[styles.actionWrapper, styles.deleteAction, { opacity }]}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          <TouchableOpacity style={styles.actionBtn} onPress={handleDelete} activeOpacity={0.8}>
+          <TouchableOpacity style={styles.actionBtn} onPress={executeDelete} activeOpacity={0.8}>
             <Feather name="trash-2" size={20} color="#fff" />
             <Text style={styles.actionText}>Delete</Text>
           </TouchableOpacity>
@@ -121,49 +143,49 @@ export default function TransactionCard({ transaction, onPress, onDelete, onEdit
   };
 
   return (
-    <Swipeable
-      ref={swipeableRef}
-      renderRightActions={onDelete ? renderRightActions : undefined}
-      renderLeftActions={onEdit ? renderLeftActions : undefined}
-      rightThreshold={80}
-      leftThreshold={80}
-      onSwipeableOpen={(direction) => {
-        if (direction === "left") {
-          // Fully swiped left → auto delete
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          setTimeout(() => onDelete?.(), 200);
-        }
-      }}
-      friction={2}
-      overshootFriction={8}
-      containerStyle={styles.swipeContainer}
-    >
-      <TouchableOpacity
-        style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}
-        onPress={onPress}
-        activeOpacity={0.7}
-      >
-        <View style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}>
-          <Feather name={categoryInfo.icon as any} size={20} color={categoryInfo.color} />
-        </View>
-        <View style={styles.info}>
-          <Text style={[styles.merchant, { color: colors.foreground }]} numberOfLines={1}>
-            {transaction.merchant}
-          </Text>
-          <Text style={[styles.category, { color: colors.mutedForeground }]}>
-            {transaction.category} · {transaction.bank}
-          </Text>
-        </View>
-        <View style={styles.right}>
-          <Text style={[styles.amount, { color: isCredit ? "#4CD964" : colors.foreground }]}>
-            {isCredit ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
-          </Text>
-          <Text style={[styles.date, { color: colors.mutedForeground }]}>
-            {formatDate(transaction.date)}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    </Swipeable>
+    <View style={styles.swipeContainer}>
+      {isDeleting && onDelete && (
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: "#EF5350", borderRadius: 14 }]} />
+      )}
+      <Animated.View style={{ transform: [{ translateX: rowTranslateX }] }}>
+        <Swipeable
+          ref={swipeableRef}
+          renderRightActions={onDelete ? renderRightActions : undefined}
+          renderLeftActions={onEdit ? renderLeftActions : undefined}
+          rightThreshold={80}
+          leftThreshold={80}
+          friction={2}
+          overshootFriction={4}
+          containerStyle={{ borderRadius: 14, overflow: "hidden" }}
+        >
+          <TouchableOpacity
+            style={[styles.container, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={onPress}
+            activeOpacity={0.7}
+          >
+            <View style={[styles.iconContainer, { backgroundColor: categoryInfo.color + "20" }]}>
+              <Feather name={categoryInfo.icon as any} size={20} color={categoryInfo.color} />
+            </View>
+            <View style={styles.info}>
+              <Text style={[styles.merchant, { color: colors.foreground }]} numberOfLines={1}>
+                {transaction.merchant}
+              </Text>
+              <Text style={[styles.category, { color: colors.mutedForeground }]}>
+                {transaction.category} · {transaction.bank}
+              </Text>
+            </View>
+            <View style={styles.right}>
+              <Text style={[styles.amount, { color: isCredit ? "#4CD964" : "#EF5350" }]}>
+                {isCredit ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
+              </Text>
+              <Text style={[styles.date, { color: colors.mutedForeground }]}>
+                {formatDate(transaction.date)}
+              </Text>
+            </View>
+          </TouchableOpacity>
+        </Swipeable>
+      </Animated.View>
+    </View>
   );
 }
 

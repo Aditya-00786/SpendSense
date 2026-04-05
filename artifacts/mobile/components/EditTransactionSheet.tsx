@@ -78,7 +78,7 @@ export default function EditTransactionSheet({ transaction, onClose, onSave }: P
                 <Text style={[styles.readOnlyLabel, { color: colors.mutedForeground }]}>Amount</Text>
                 <Text style={[
                   styles.readOnlyValue,
-                  { color: transaction.type === "credit" ? "#4CD964" : colors.foreground },
+                  { color: transaction.type === "credit" ? "#4CD964" : "#EF5350" },
                 ]}>
                   {transaction.type === "credit" ? "+" : "-"}₹{transaction.amount.toLocaleString("en-IN")}
                 </Text>

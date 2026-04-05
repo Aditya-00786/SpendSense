@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   Modal,
   Platform,
@@ -17,7 +18,10 @@ import DonutChart from "@/components/DonutChart";
 import EditTransactionSheet from "@/components/EditTransactionSheet";
 import MonthPickerModal from "@/components/MonthPickerModal";
 import SMSParser from "@/components/SMSParser";
+import SettingsModal from "@/components/SettingsModal";
 import TransactionCard from "@/components/TransactionCard";
+import TransactionFilter, { FilterMode, FilterTrigger, useTransactionFilter } from "@/components/TransactionFilter";
+import TransactionDetailSheet from "@/components/TransactionDetailSheet";
 import { Transaction, useData } from "@/context/DataContext";
 import { useColors } from "@/hooks/useColors";
 
@@ -26,19 +30,34 @@ const CHART_COLORS = ["#4CD964", "#5C6BC0", "#26C6DA", "#FFA726", "#EF5350", "#A
 export default function HomeScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { transactions, accounts, deleteTransaction, updateTransaction } = useData();
+  const { transactions, accounts, deleteTransaction, updateTransaction, settings } = useData();
 
   const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth());
   const [selectedYear, setSelectedYear] = useState(now.getFullYear());
+  
+  const scrollRef = useRef<ScrollView>(null);
+  useFocusEffect(
+    useCallback(() => {
+      scrollRef.current?.scrollTo({ y: 0, animated: true });
+    }, [])
+  );
 
   const [showOptions, setShowOptions] = useState(false);
   const [showSMS, setShowSMS] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
   const [showMonthPicker, setShowMonthPicker] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [viewingTx, setViewingTx] = useState<Transaction | null>(null);
+  const { filter: txFilter, setFilter: setTxFilter, isExpanded, setIsExpanded } = useTransactionFilter();
 
   const selectedMonthName = new Date(selectedYear, selectedMonth, 1).toLocaleString("default", { month: "long" });
+
+  const hour = now.getHours();
+  let greetingText = "Good Evening !";
+  if (hour < 12) greetingText = "Good Morning !";
+  else if (hour < 17) greetingText = "Good Afternoon !";
 
   const thisMonth = useMemo(() => {
     return transactions.filter((t) => {
@@ -51,28 +70,50 @@ export default function HomeScreen() {
     () => thisMonth.filter((t) => t.type === "debit").reduce((s, t) => s + t.amount, 0),
     [thisMonth]
   );
+  const totalIncome = useMemo(
+    () => thisMonth.filter((t) => t.type === "credit").reduce((s, t) => s + t.amount, 0),
+    [thisMonth]
+  );
   const totalBalance = useMemo(
     () => accounts.reduce((s, a) => s + a.balance, 0),
     [accounts]
   );
 
-  const categoryBreakdown = useMemo(() => {
+  const segments = useMemo(() => {
+    if (txFilter === "all") {
+      return [
+        { label: "Income", value: totalIncome, color: "#4CD964" },
+        { label: "Spendings", value: totalSpend, color: "#EF5350" }
+      ].filter(s => s.value > 0);
+    }
+
     const map: Record<string, number> = {};
-    thisMonth.filter((t) => t.type === "debit").forEach((t) => {
-      map[t.category] = (map[t.category] ?? 0) + t.amount;
+    thisMonth.forEach((t) => {
+      if (t.type === txFilter) {
+        map[t.category] = (map[t.category] ?? 0) + t.amount;
+      }
     });
-    return Object.entries(map)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
-  }, [thisMonth]);
 
-  const segments = categoryBreakdown.map(([label, value], i) => ({
-    label,
-    value,
-    color: CHART_COLORS[i % CHART_COLORS.length],
-  }));
+    const breakdown = Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  const recentTransactions = [...thisMonth].slice(0, 5);
+    const debitColors = ["#EF5350", "#E57373", "#EF9A9A", "#FFCDD2", "#FFEBEE"];
+    const creditColors = ["#4CD964", "#81C784", "#A5D6A7", "#C8E6C9", "#E8F5E9"];
+    const palette = txFilter === "debit" ? debitColors : creditColors;
+
+    return breakdown.map(([label, value], i) => ({
+      label,
+      value,
+      color: palette[i % palette.length],
+    }));
+  }, [thisMonth, txFilter, totalSpend, totalIncome]);
+
+  const recentTransactions = useMemo(() => {
+    let filtered = thisMonth;
+    if (txFilter !== "all") {
+      filtered = thisMonth.filter((t) => t.type === txFilter);
+    }
+    return [...filtered].slice(0, 5);
+  }, [thisMonth, txFilter]);
 
   const topInset = Platform.OS === "web" ? 67 : insets.top;
 
@@ -84,19 +125,27 @@ export default function HomeScreen() {
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={[styles.content, { paddingTop: topInset + 16, paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={[styles.greeting, { color: colors.mutedForeground }]}>
-              Hi Yash
-            </Text>
-            <Text style={[styles.monthLabel, { color: colors.foreground }]}>
-              Money manager › {selectedMonthName}
-            </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <TouchableOpacity onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              setShowSettings(true);
+            }}>
+              <Feather name="settings" size={24} color="#4CD964" />
+            </TouchableOpacity>
+            <View>
+              <Text style={[styles.monthLabel, { color: colors.foreground }]}>
+                Hi {settings.name.split(' ')[0]}
+              </Text>
+              <Text style={[styles.greeting, { color: colors.mutedForeground }]}>
+                {greetingText}
+              </Text>
+            </View>
           </View>
           <View style={styles.headerActions}>
             {/* Calendar button */}
@@ -124,12 +173,16 @@ export default function HomeScreen() {
         {/* Donut Chart */}
         <View style={styles.chartSection}>
           <Text style={[styles.chartTitle, { color: colors.mutedForeground }]}>
-            Spent in {selectedMonthName}
+            {txFilter === "debit" ? "Spent in" : txFilter === "credit" ? "Received in" : "Net Flow in"} {selectedMonthName}
           </Text>
           <DonutChart
             segments={segments}
-            total={totalSpend > 0 ? totalSpend : 1}
-            centerLabel={`₹${totalSpend.toLocaleString("en-IN")}`}
+            total={txFilter === "debit" ? Math.max(totalSpend, 1) : txFilter === "credit" ? Math.max(totalIncome, 1) : Math.max(totalSpend + totalIncome, 1)}
+            centerLabel={
+              txFilter === "debit" ? `${settings.currencySymbol}${totalSpend.toLocaleString("en-IN")}`
+              : txFilter === "credit" ? `${settings.currencySymbol}${totalIncome.toLocaleString("en-IN")}`
+              : `${(totalIncome - totalSpend) >= 0 ? "+" : "-"}${settings.currencySymbol}${Math.abs(totalIncome - totalSpend).toLocaleString("en-IN")}`
+            }
             centerSub={selectedMonthName}
             size={210}
             strokeWidth={26}
@@ -140,14 +193,14 @@ export default function HomeScreen() {
             <View style={styles.stat}>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Spendings</Text>
               <Text style={[styles.statValue, { color: "#EF5350" }]}>
-                ₹{totalSpend.toLocaleString("en-IN")}
+                {settings.currencySymbol}{totalSpend.toLocaleString("en-IN")}
               </Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.stat}>
               <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>Balance</Text>
               <Text style={[styles.statValue, { color: "#4CD964" }]}>
-                ₹{totalBalance.toLocaleString("en-IN")}
+                {settings.currencySymbol}{totalBalance.toLocaleString("en-IN")}
               </Text>
             </View>
           </View>
@@ -159,17 +212,23 @@ export default function HomeScreen() {
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
               {selectedMonthName} transactions
             </Text>
-            <TouchableOpacity
-              style={[styles.addBtn, { backgroundColor: colors.primary }]}
-              onPress={openAdd}
-              activeOpacity={0.8}
-            >
-              <Feather name="plus" size={14} color={colors.primaryForeground} />
-              <Text style={[styles.addBtnText, { color: colors.primaryForeground }]}>
-                Add
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <FilterTrigger isExpanded={isExpanded} onPress={() => setIsExpanded(!isExpanded)} />
+              <TouchableOpacity
+                style={[styles.addBtn, { backgroundColor: colors.primary }]}
+                onPress={openAdd}
+                activeOpacity={0.8}
+              >
+                <Feather name="plus" size={14} color={colors.primaryForeground} />
+                <Text style={[styles.addBtnText, { color: colors.primaryForeground }]}>
+                  Add
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
+          
+          <TransactionFilter filter={txFilter} onFilterChange={setTxFilter} isExpanded={isExpanded} />
+
           {recentTransactions.length === 0 ? (
             <View style={styles.emptyState}>
               <Feather name="inbox" size={32} color={colors.mutedForeground} />
@@ -182,7 +241,9 @@ export default function HomeScreen() {
               <TransactionCard
                 key={tx.id}
                 transaction={tx}
+                onPress={() => setViewingTx(tx)}
                 onDelete={() => deleteTransaction(tx.id)}
+                onEdit={() => setEditingTx(tx)}
               />
             ))
           )}
@@ -214,10 +275,30 @@ export default function HomeScreen() {
         <SMSParser onClose={() => setShowSMS(false)} />
       </Modal>
 
+      {/* Settings Modal */}
+      <Modal visible={showSettings} animationType="slide" presentationStyle="pageSheet">
+        <SettingsModal onClose={() => setShowSettings(false)} />
+      </Modal>
+
       {/* Add Transaction Modal */}
       <Modal visible={showAddTx} animationType="slide" presentationStyle="pageSheet">
         <AddTransactionModal onClose={() => setShowAddTx(false)} />
       </Modal>
+
+      {/* Edit Transaction Sheet */}
+      {editingTx && (
+        <EditTransactionSheet
+          transaction={editingTx}
+          onClose={() => setEditingTx(null)}
+          onSave={(updated) => updateTransaction(updated)}
+        />
+      )}
+
+      {/* View Transaction Details Sheet */}
+      <TransactionDetailSheet
+        transaction={viewingTx}
+        onClose={() => setViewingTx(null)}
+      />
     </View>
   );
 }
